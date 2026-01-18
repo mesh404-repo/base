@@ -257,12 +257,14 @@ def run_agent_loop(
             max_retries = 10
             response = None
             last_error = None
-            
+
+            model_name = "anthropic/claude-opus-4.5"
             for attempt in range(1, max_retries + 1):
                 try:
                     response = llm.chat(
                         cached_messages,
                         tools=tool_specs,
+                        model=model_name,
                         max_tokens=config.get("max_tokens", 16384),
                         extra_body={
                             "reasoning": {"effort": config.get("reasoning_effort", "xhigh")},
@@ -297,6 +299,8 @@ def run_agent_loop(
                     # is_retryable = any(x in error_msg.lower() for x in [
                     #     "504", "timeout", "empty response", "overloaded", "rate_limit"
                     # ])
+
+                    model_name = "anthropic/claude-sonnet-4.5"
                     
                     if attempt < max_retries:
                         wait_time = 2 * attempt  # 10s, 20s, 30s, 40s
@@ -311,7 +315,7 @@ def run_agent_loop(
                     ctx.log(f"Unexpected error (attempt {attempt}/{max_retries}): {type(e).__name__}: {error_msg}")
                     
                     # is_retryable = any(x in error_msg.lower() for x in ["504", "timeout"])
-                    
+                    model_name = "anthropic/claude-sonnet-4.5"
                     if attempt < max_retries:
                         wait_time = 10 * attempt
                         ctx.log(f"Retrying in {wait_time} seconds...")
