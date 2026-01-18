@@ -26,8 +26,8 @@ if TYPE_CHECKING:
 APPROX_CHARS_PER_TOKEN = 4
 
 # Context limits
-MODEL_CONTEXT_LIMIT = 40_000  # Claude Opus 4.5 context window
-OUTPUT_TOKEN_MAX = 32_000  # Max output tokens to reserve
+MODEL_CONTEXT_LIMIT = 16_000  # Claude Opus 4.5 context window
+OUTPUT_TOKEN_MAX = 16_384  # Max output tokens to reserve
 AUTO_COMPACT_THRESHOLD = 0.85  # Trigger compaction at 85% of usable context
 
 # Pruning constants (from OpenCode)
@@ -54,6 +54,12 @@ Here is the summary from the previous context:
 
 """
 
+summarize_llm = LLM(
+    provider="openrouter",
+    default_model="anthropic/claude-opus-4.5",
+    temperature=0.0,
+    max_tokens=4096,
+)
 
 # =============================================================================
 # Token Estimation
@@ -104,7 +110,7 @@ def estimate_total_tokens(messages: List[Dict[str, Any]]) -> int:
 
 def get_usable_context() -> int:
     """Get usable context window (total - reserved for output)."""
-    return MODEL_CONTEXT_LIMIT - OUTPUT_TOKEN_MAX
+    return MODEL_CONTEXT_LIMIT
 
 
 def is_overflow(total_tokens: int, threshold: float = AUTO_COMPACT_THRESHOLD) -> bool:
@@ -350,8 +356,15 @@ def run_compaction(
     _log(f"Keeping: {len(messages_to_keep)} messages ({keep_tokens} tokens)")
     
     # Build compaction request with only the messages to compact
-    # Include system prompt for context during summarization
-    compaction_messages = messages_to_compact
+    # Strip cache_control and other metadata - only keep role and content
+    compaction_messages = []
+    for msg in messages_to_compact:
+        clean_msg = {
+            "role": msg["role"],
+            "content": msg.get("content", ""),
+        }
+        compaction_messages.append(clean_msg)
+    
     compaction_messages.append({
         "role": "user",
         "content": COMPACTION_PROMPT,
@@ -362,7 +375,8 @@ def run_compaction(
     for attempt in range(1, max_retries + 1):
         try:
             # Call LLM for summary (no tools, just text)        
-            response = llm.chat(
+            
+            response = summarize_llm.chat(
                 compaction_messages,
                 model=model,
                 max_tokens=4096,  # Summary should be concise

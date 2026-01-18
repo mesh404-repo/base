@@ -59,7 +59,7 @@ CONFIG: Dict[str, Any] = {
     "model_context_limit": 200_000,
     
     # Reserved tokens for output
-    "output_token_max": 32_000,
+    "output_token_max": 16_384,
     
     # Trigger compaction at this % of usable context (85%)
     "auto_compact_threshold": 0.85,
