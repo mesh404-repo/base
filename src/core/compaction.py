@@ -27,12 +27,12 @@ APPROX_CHARS_PER_TOKEN = 4
 
 # Context limits
 MODEL_CONTEXT_LIMIT = 40_000  # Claude Opus 4.5 context window
-OUTPUT_TOKEN_MAX = 32_000  # Max output tokens to reserve
+OUTPUT_TOKEN_MAX = 16_384  # Max output tokens to reserve
 AUTO_COMPACT_THRESHOLD = 0.85  # Trigger compaction at 85% of usable context
 
 # Pruning constants (from OpenCode)
-PRUNE_PROTECT = 40_000  # Protect this many tokens of recent tool output
-PRUNE_MINIMUM = 20_000  # Only prune if we can recover at least this many tokens
+PRUNE_PROTECT = 25_000  # Protect this many tokens of recent tool output
+PRUNE_MINIMUM = 10_000  # Only prune if we can recover at least this many tokens
 PRUNE_MARKER = "[Old tool result content cleared]"
 
 # Compaction prompts (from Codex)
@@ -104,7 +104,7 @@ def estimate_total_tokens(messages: List[Dict[str, Any]]) -> int:
 
 def get_usable_context() -> int:
     """Get usable context window (total - reserved for output)."""
-    return MODEL_CONTEXT_LIMIT - OUTPUT_TOKEN_MAX
+    return MODEL_CONTEXT_LIMIT
 
 
 def is_overflow(total_tokens: int, threshold: float = AUTO_COMPACT_THRESHOLD) -> bool:
@@ -338,65 +338,25 @@ def run_compaction(
     # 2. Messages to compact (starting from compact_start)
     # 3. Messages to keep (recent ones after compacted section)
     protected_messages = messages[:PROTECTED_MESSAGE_COUNT]
-    messages_to_compact = messages[compact_start:compact_start + num_to_compact]
     messages_to_keep = messages[compact_start + num_to_compact:]
     
     protected_tokens = estimate_total_tokens(protected_messages)
-    compact_tokens = estimate_total_tokens(messages_to_compact)
+    # compact_tokens = estimate_total_tokens(messages_to_compact)
     keep_tokens = estimate_total_tokens(messages_to_keep)
     
     _log(f"Protected: {len(protected_messages)} messages ({protected_tokens} tokens)")
-    _log(f"Compacting: {num_to_compact} messages ({compact_tokens} tokens)")
+    # _log(f"Compacting: {num_to_compact} messages ({compact_tokens} tokens)")
     _log(f"Keeping: {len(messages_to_keep)} messages ({keep_tokens} tokens)")
     
-    # Build compaction request with only the messages to compact
-    # Include system prompt for context during summarization
-    compaction_messages = messages_to_compact
-    compaction_messages.append({
-        "role": "user",
-        "content": COMPACTION_PROMPT,
-    })
     
-    max_retries = 5
-
-    for attempt in range(1, max_retries + 1):
-        try:
-            # Call LLM for summary (no tools, just text)        
-            response = llm.chat(
-                compaction_messages,
-                model=model,
-                max_tokens=4096,  # Summary should be concise
-            )
-            
-            summary = response.text or ""
-            
-            if not summary:
-                _log("Compaction failed: empty response")
-                return messages
-            
-            summary_tokens = estimate_tokens(summary)
-            _log(f"Compaction complete: {summary_tokens} token summary")
-            
-            # Build new message list:
-            # 1. Protected messages (first PROTECTED_MESSAGE_COUNT, unchanged)
-            # 2. Summary of compacted messages
-            # 3. Remaining recent messages (preserved exactly)
-            compacted = list(protected_messages)  # Copy protected messages
-            compacted.append({"role": "user", "content": SUMMARY_PREFIX + summary})
-            
-            # Add back the messages we kept (recent ones)
-            compacted.extend(messages_to_keep)
-            
-            final_tokens = estimate_total_tokens(compacted)
-            _log(f"Final context: {final_tokens} tokens (target: {target_tokens})")
-            
-            return compacted
-            
-        except Exception as e:
-            _log(f"Compaction failed: {e}")
+    compacted = list(protected_messages)  # Copy protected messages    
     
-    return messages
-
+    compacted.extend(messages_to_keep)
+    
+    final_tokens = estimate_total_tokens(compacted)
+    _log(f"Final context: {final_tokens} tokens (target: {target_tokens})")
+    
+    return compacted
 
 # =============================================================================
 # Main Context Management
