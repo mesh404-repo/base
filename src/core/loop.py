@@ -290,15 +290,15 @@ def run_agent_loop(
                     ctx.log(f"LLM error (attempt {attempt}/{max_retries}): {e.code} - {error_msg}")
                     
                     # Don't retry authentication errors
-                    if e.code in ("authentication_error", "invalid_api_key"):
-                        raise
+                    # if e.code in ("authentication_error", "invalid_api_key"):
+                    #     raise
                     
                     # Check if it's a retryable error
-                    is_retryable = any(x in error_msg.lower() for x in [
-                        "504", "timeout", "empty response", "overloaded", "rate_limit"
-                    ])
+                    # is_retryable = any(x in error_msg.lower() for x in [
+                    #     "504", "timeout", "empty response", "overloaded", "rate_limit"
+                    # ])
                     
-                    if attempt < max_retries and is_retryable:
+                    if attempt < max_retries:
                         wait_time = 10 * attempt  # 10s, 20s, 30s, 40s
                         ctx.log(f"Retrying in {wait_time} seconds...")
                         time.sleep(wait_time)
@@ -310,9 +310,9 @@ def run_agent_loop(
                     error_msg = str(e)
                     ctx.log(f"Unexpected error (attempt {attempt}/{max_retries}): {type(e).__name__}: {error_msg}")
                     
-                    is_retryable = any(x in error_msg.lower() for x in ["504", "timeout"])
+                    # is_retryable = any(x in error_msg.lower() for x in ["504", "timeout"])
                     
-                    if attempt < max_retries and is_retryable:
+                    if attempt < max_retries:
                         wait_time = 10 * attempt
                         ctx.log(f"Retrying in {wait_time} seconds...")
                         time.sleep(wait_time)

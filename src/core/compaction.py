@@ -26,7 +26,7 @@ if TYPE_CHECKING:
 APPROX_CHARS_PER_TOKEN = 4
 
 # Context limits
-MODEL_CONTEXT_LIMIT = 72_000  # Claude Opus 4.5 context window
+MODEL_CONTEXT_LIMIT = 40_000  # Claude Opus 4.5 context window
 OUTPUT_TOKEN_MAX = 32_000  # Max output tokens to reserve
 AUTO_COMPACT_THRESHOLD = 0.85  # Trigger compaction at 85% of usable context
 
@@ -217,7 +217,7 @@ def prune_old_tool_outputs(
 # =============================================================================
 
 # First N messages to always keep intact (including system prompt)
-PROTECTED_MESSAGE_COUNT = 3
+PROTECTED_MESSAGE_COUNT = 2
 
 
 def _find_messages_to_compact(
@@ -324,7 +324,7 @@ def run_compaction(
     # Calculate target tokens if not specified
     if target_tokens is None:
         usable = get_usable_context()
-        target_tokens = int(usable * AUTO_COMPACT_THRESHOLD)
+        target_tokens = int(usable * 0.75)
     
     # Find which messages to compact
     compact_start, num_to_compact = _find_messages_to_compact(messages, target_tokens)
@@ -357,42 +357,45 @@ def run_compaction(
         "content": COMPACTION_PROMPT,
     })
     
-    try:
-        # Call LLM for summary (no tools, just text)
-        response = llm.chat(
-            compaction_messages,
-            model=model,
-            max_tokens=4096,  # Summary should be concise
-        )
-        
-        summary = response.text or ""
-        
-        if not summary:
-            _log("Compaction failed: empty response")
-            return messages
-        
-        summary_tokens = estimate_tokens(summary)
-        _log(f"Compaction complete: {summary_tokens} token summary")
-        
-        # Build new message list:
-        # 1. Protected messages (first PROTECTED_MESSAGE_COUNT, unchanged)
-        # 2. Summary of compacted messages
-        # 3. Remaining recent messages (preserved exactly)
-        compacted = list(protected_messages)  # Copy protected messages
-        compacted.append({"role": "user", "content": SUMMARY_PREFIX + summary})
-        
-        # Add back the messages we kept (recent ones)
-        compacted.extend(messages_to_keep)
-        
-        final_tokens = estimate_total_tokens(compacted)
-        _log(f"Final context: {final_tokens} tokens (target: {target_tokens})")
-        
-        return compacted
-        
-    except Exception as e:
-        _log(f"Compaction failed: {e}")
-        # Return original messages if compaction fails
-        return messages
+    max_retries = 5
+
+    for attempt in range(1, max_retries + 1):
+        try:
+            # Call LLM for summary (no tools, just text)        
+            response = llm.chat(
+                compaction_messages,
+                model=model,
+                max_tokens=4096,  # Summary should be concise
+            )
+            
+            summary = response.text or ""
+            
+            if not summary:
+                _log("Compaction failed: empty response")
+                return messages
+            
+            summary_tokens = estimate_tokens(summary)
+            _log(f"Compaction complete: {summary_tokens} token summary")
+            
+            # Build new message list:
+            # 1. Protected messages (first PROTECTED_MESSAGE_COUNT, unchanged)
+            # 2. Summary of compacted messages
+            # 3. Remaining recent messages (preserved exactly)
+            compacted = list(protected_messages)  # Copy protected messages
+            compacted.append({"role": "user", "content": SUMMARY_PREFIX + summary})
+            
+            # Add back the messages we kept (recent ones)
+            compacted.extend(messages_to_keep)
+            
+            final_tokens = estimate_total_tokens(compacted)
+            _log(f"Final context: {final_tokens} tokens (target: {target_tokens})")
+            
+            return compacted
+            
+        except Exception as e:
+            _log(f"Compaction failed: {e}")
+    
+    return messages
 
 
 # =============================================================================
