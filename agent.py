@@ -52,6 +52,13 @@ class SuperAgent(Agent):
             temperature=CONFIG.get("temperature"),
             max_tokens=CONFIG["max_tokens"],
         )
+
+        self.summarize_llm = LLM(
+            provider=CONFIG.get("provider", "openrouter"),
+            default_model="anthropic/claude-opus-4.5",
+            temperature=0.0,
+            max_tokens=4096,
+        )
         
         self.tools = ToolRegistry()
         self._start_time = time.time()
@@ -71,6 +78,7 @@ class SuperAgent(Agent):
         try:
             run_agent_loop(
                 llm=self.llm,
+                summarize_llm=self.summarize_llm,
                 tools=self.tools,
                 ctx=ctx,
                 config=CONFIG,

@@ -15,8 +15,6 @@ import sys
 import time
 from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
-from term_sdk import LLM
-
 # =============================================================================
 # Constants (matching OpenCode)
 # =============================================================================
@@ -52,13 +50,6 @@ SUMMARY_PREFIX = """Another language model started to solve this problem and pro
 Here is the summary from the previous context:
 
 """
-
-summarize_llm = LLM(
-    provider="openrouter",
-    default_model="anthropic/claude-opus-4.5",
-    temperature=0.0,
-    max_tokens=4096,
-)
 
 # =============================================================================
 # Token Estimation
@@ -375,7 +366,7 @@ def run_compaction(
         try:
             # Call LLM for summary (no tools, just text)        
             
-            response = summarize_llm.chat(
+            response = llm.chat(
                 compaction_messages,
                 model=model,
                 max_tokens=4096,  # Summary should be concise
@@ -419,6 +410,7 @@ def manage_context(
     messages: List[Dict[str, Any]],
     system_prompt: str,
     llm: "LLM",
+    summarize_llm: "LLM",
     force_compaction: bool = False,
 ) -> List[Dict[str, Any]]:
     """
@@ -463,7 +455,7 @@ def manage_context(
     
     # Step 2: Run AI compaction
     _log(f"Pruning insufficient ({pruned_tokens} tokens), running AI compaction...")
-    compacted = run_compaction(llm, pruned, system_prompt)
+    compacted = run_compaction(summarize_llm, pruned, system_prompt)
     compacted_tokens = estimate_total_tokens(compacted)
     
     _log(f"Compaction result: {total_tokens} -> {compacted_tokens} tokens")

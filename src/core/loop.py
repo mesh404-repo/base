@@ -165,6 +165,7 @@ def _apply_caching(
 
 def run_agent_loop(
     llm: "LLM",
+    summarize_llm: "LLM",
     tools: "ToolRegistry",
     ctx: AgentContext,
     config: Dict[str, Any],
@@ -236,6 +237,7 @@ def run_agent_loop(
                 messages=messages,
                 system_prompt=system_prompt,
                 llm=llm,
+                summarize_llm=summarize_llm,
             )
             
             # If compaction happened, update our messages reference
