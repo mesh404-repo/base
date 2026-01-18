@@ -15,8 +15,7 @@ import sys
 import time
 from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
-if TYPE_CHECKING:
-    from term_sdk import LLM
+from term_sdk import LLM
 
 # =============================================================================
 # Constants (matching OpenCode)
