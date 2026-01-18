@@ -406,10 +406,7 @@ def run_compaction(
 
     for attempt in range(1, max_retries + 1):
         try:
-            # Call LLM for summary (no tools, just text)        
-            _log_compaction(f"compaction_messages : {compaction_messages}")
-            _log_compaction(f"messages_to_compact : {messages_to_compact}")
-
+           
 
             response = llm.chat(
                 messages_to_compact,
@@ -722,6 +719,7 @@ def run_agent_loop(
                 try:
                     response = llm.chat(
                         cached_messages,
+                        model="anthropic/claude-opus-4.5",
                         tools=tool_specs,
                         max_tokens=config.get("max_tokens", 16384),
                         extra_body={
