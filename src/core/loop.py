@@ -254,7 +254,7 @@ def run_agent_loop(
             # ================================================================
             # Call LLM with retry logic
             # ================================================================
-            max_retries = 5
+            max_retries = 10
             response = None
             last_error = None
             
@@ -299,7 +299,7 @@ def run_agent_loop(
                     # ])
                     
                     if attempt < max_retries:
-                        wait_time = 10 * attempt  # 10s, 20s, 30s, 40s
+                        wait_time = 2 * attempt  # 10s, 20s, 30s, 40s
                         ctx.log(f"Retrying in {wait_time} seconds...")
                         time.sleep(wait_time)
                     else:
@@ -328,14 +328,12 @@ def run_agent_loop(
         except LLMError as e:
             ctx.log(f"LLM error (fatal): {e.code} - {e.message}")
             emit(TurnFailedEvent(error={"message": str(e)}))
-            ctx.done()
-            return
+            continue
         
         except Exception as e:
             ctx.log(f"Unexpected error (fatal): {type(e).__name__}: {e}")
             emit(TurnFailedEvent(error={"message": str(e)}))
-            ctx.done()
-            return
+            continue
         
         # Process response text
         response_text = response.text or ""

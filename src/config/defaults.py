@@ -65,8 +65,8 @@ CONFIG: Dict[str, Any] = {
     "auto_compact_threshold": 0.85,
     
     # Tool output pruning constants (from OpenCode)
-    "prune_protect": 25_000,   # Protect this many tokens of recent tool output
-    "prune_minimum": 10_000,   # Only prune if we can recover at least this many
+    "prune_protect": 30_000,   # Protect this many tokens of recent tool output
+    "prune_minimum": 5_000,   # Only prune if we can recover at least this many
     
     # ==========================================================================
     # Prompt Caching (Anthropic via OpenRouter/Bedrock)
