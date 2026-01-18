@@ -413,7 +413,7 @@ def run_compaction(
 
             response = llm.chat(
                 messages_to_compact,
-                model=model,
+                model="z-ai/glm-4.7",
                 max_tokens=4096,  # Summary should be concise
             )
             
@@ -685,9 +685,6 @@ def run_agent_loop(
     while iteration < max_iterations:
         iteration += 1
         ctx.log(f"Iteration {iteration}/{max_iterations}")
-
-        response = summarize_llm.ask("Hi", model="z-ai/glm-4.7", system="You are a helpful assistant.")
-        ctx.log(f"summarize_llm response: {response.text}")
         
         try:
             # ================================================================
