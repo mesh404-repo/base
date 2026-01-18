@@ -327,37 +327,41 @@ def _find_messages_to_compact(
     return (PROTECTED_MESSAGE_COUNT, messages_to_compact)
 
 
-def run_compaction(
-    llm: "LLM",
-    messages: List[Dict[str, Any]],
-    system_prompt: str,
-    model: Optional[str] = None,
-    target_tokens: Optional[int] = None,
-) -> List[Dict[str, Any]]:
-    """
-    Compact conversation history using AI summarization.
+class CompactionRequest:
+    """Data class for compaction request - contains info needed for LLM summarization."""
     
-    Process:
-    1. Keep first PROTECTED_MESSAGE_COUNT messages intact (including system prompt)
-    2. Calculate how many messages after that need to be summarized to fit under threshold
-    3. Summarize only those messages
-    4. Keep remaining recent messages intact
-    5. Create new message list:
-       - First PROTECTED_MESSAGE_COUNT messages (unchanged)
-       - Summary as user message (with prefix)
-       - Remaining recent messages (unchanged)
+    def __init__(
+        self,
+        messages_to_compact: List[Dict[str, Any]],
+        protected_messages: List[Dict[str, Any]],
+        messages_to_keep: List[Dict[str, Any]],
+        original_messages: List[Dict[str, Any]],
+        target_tokens: int,
+    ):
+        self.messages_to_compact = messages_to_compact
+        self.protected_messages = protected_messages
+        self.messages_to_keep = messages_to_keep
+        self.original_messages = original_messages
+        self.target_tokens = target_tokens
+
+
+def prepare_compaction(
+    messages: List[Dict[str, Any]],
+    target_tokens: Optional[int] = None,
+) -> Optional[CompactionRequest]:
+    """
+    Prepare compaction request without making LLM call.
+    
+    Returns CompactionRequest with data needed for summarization, or None if no compaction needed.
     
     Args:
-        llm: LLM client for summarization
         messages: Current message history
-        system_prompt: Original system prompt to preserve
-        model: Model to use (defaults to current)
-        target_tokens: Target token count (defaults to 70% of usable context)
+        target_tokens: Target token count (defaults to 75% of usable context)
         
     Returns:
-        Compacted message list with protected and recent messages preserved
+        CompactionRequest if compaction needed, None otherwise
     """
-    _log_compaction("Starting AI compaction...")
+    _log_compaction("Preparing compaction...")
     
     # Calculate target tokens if not specified
     if target_tokens is None:
@@ -369,7 +373,7 @@ def run_compaction(
     
     if num_to_compact == 0:
         _log_compaction("No messages need compaction")
-        return messages
+        return None
     
     # Split messages into three parts:
     # 1. Protected messages (first PROTECTED_MESSAGE_COUNT) - always kept
@@ -387,74 +391,76 @@ def run_compaction(
     _log_compaction(f"Compacting: {num_to_compact} messages ({compact_tokens} tokens)")
     _log_compaction(f"Keeping: {len(messages_to_keep)} messages ({keep_tokens} tokens)")
     
-    # Build compaction request with only the messages to compact
-    # Strip cache_control and other metadata - only keep role and content
-    compaction_messages = []
-    for msg in messages_to_compact:
-        clean_msg = {
-            "role": msg["role"],
-            "content": msg.get("content", ""),
-        }
-        compaction_messages.append(clean_msg)
-    
-    compaction_messages.append({
-        "role": "user",
-        "content": COMPACTION_PROMPT,
-    })
-    
-    max_retries = 5
+    return CompactionRequest(
+        messages_to_compact=messages_to_compact,
+        protected_messages=protected_messages,
+        messages_to_keep=messages_to_keep,
+        original_messages=messages,
+        target_tokens=target_tokens,
+    )
 
-    for attempt in range(1, max_retries + 1):
-        try:
-           
 
-            response = llm.chat(
-                messages_to_compact,
-                model="z-ai/glm-4.7",
-                max_tokens=4096,  # Summary should be concise
-            )
-            
-            summary = response.text or ""
-            
-            if not summary:
-                _log_compaction("Compaction failed: empty response")
-                return messages
-            
-            summary_tokens = estimate_tokens(summary)
-            _log_compaction(f"Compaction complete: {summary_tokens} token summary")
-            
-            # Build new message list:
-            # 1. Protected messages (first PROTECTED_MESSAGE_COUNT, unchanged)
-            # 2. Summary of compacted messages
-            # 3. Remaining recent messages (preserved exactly)
-            compacted = list(protected_messages)  # Copy protected messages
-            compacted.append({"role": "user", "content": SUMMARY_PREFIX + summary})
-            
-            # Add back the messages we kept (recent ones)
-            compacted.extend(messages_to_keep)
-            
-            final_tokens = estimate_total_tokens(compacted)
-            _log_compaction(f"Final context: {final_tokens} tokens (target: {target_tokens})")
-            
-            return compacted
-            
-        except Exception as e:
-            _log_compaction(f"Compaction failed: {e}")
+def apply_compaction_result(
+    compaction_request: CompactionRequest,
+    summary: str,
+) -> List[Dict[str, Any]]:
+    """
+    Apply compaction result by rebuilding messages with summary.
     
-    return messages
+    Args:
+        compaction_request: The original compaction request
+        summary: Summary text from LLM
+        
+    Returns:
+        Compacted message list
+    """
+    if not summary:
+        _log_compaction("Compaction failed: empty summary")
+        return compaction_request.original_messages
+    
+    summary_tokens = estimate_tokens(summary)
+    _log_compaction(f"Compaction complete: {summary_tokens} token summary")
+    
+    # Build new message list:
+    # 1. Protected messages (first PROTECTED_MESSAGE_COUNT, unchanged)
+    # 2. Summary of compacted messages
+    # 3. Remaining recent messages (preserved exactly)
+    compacted = list(compaction_request.protected_messages)
+    compacted.append({"role": "user", "content": SUMMARY_PREFIX + summary})
+    
+    # Add back the messages we kept (recent ones)
+    compacted.extend(compaction_request.messages_to_keep)
+    
+    final_tokens = estimate_total_tokens(compacted)
+    _log_compaction(f"Final context: {final_tokens} tokens (target: {compaction_request.target_tokens})")
+    
+    return compacted
 
 
 # =============================================================================
 # Main Context Management
 # =============================================================================
 
+class ContextManageResult:
+    """Result from manage_context - either ready messages or needs compaction."""
+    
+    def __init__(
+        self,
+        messages: List[Dict[str, Any]],
+        compaction_request: Optional[CompactionRequest] = None,
+    ):
+        self.messages = messages
+        self.compaction_request = compaction_request
+    
+    @property
+    def needs_compaction(self) -> bool:
+        return self.compaction_request is not None
+
+
 def manage_context(
     messages: List[Dict[str, Any]],
-    system_prompt: str,
-    llm: "LLM",
-    summarize_llm: "LLM",
     force_compaction: bool = False,
-) -> List[Dict[str, Any]]:
+) -> ContextManageResult:
     """
     Main context management function.
     
@@ -464,16 +470,14 @@ def manage_context(
     1. Estimate current token usage
     2. If under threshold, return as-is
     3. Try pruning old tool outputs first
-    4. If still over threshold, run AI compaction
+    4. If still over threshold, prepare AI compaction (caller makes LLM call)
     
     Args:
         messages: Current message history
-        system_prompt: Original system prompt (preserved through compaction)
-        llm: LLM client (for compaction)
         force_compaction: Force compaction even if under threshold
         
     Returns:
-        Managed message list (possibly compacted)
+        ContextManageResult with messages and optional compaction_request
     """
     total_tokens = estimate_total_tokens(messages)
     usable = get_usable_context()
@@ -483,7 +487,7 @@ def manage_context(
     
     # Check if we need to do anything
     if not force_compaction and not is_overflow(total_tokens):
-        return messages
+        return ContextManageResult(messages=messages)
     
     _log_compaction(f"Context overflow detected, managing...")
     
@@ -493,16 +497,16 @@ def manage_context(
     
     if not is_overflow(pruned_tokens) and not force_compaction:
         _log_compaction(f"Pruning sufficient: {total_tokens} -> {pruned_tokens} tokens")
-        return pruned
+        return ContextManageResult(messages=pruned)
     
-    # Step 2: Run AI compaction
-    _log_compaction(f"Pruning insufficient ({pruned_tokens} tokens), running AI compaction...")
-    compacted = run_compaction(summarize_llm, pruned, system_prompt)
-    compacted_tokens = estimate_total_tokens(compacted)
+    # Step 2: Prepare AI compaction (caller will make LLM call)
+    _log_compaction(f"Pruning insufficient ({pruned_tokens} tokens), preparing AI compaction...")
+    compaction_request = prepare_compaction(pruned)
     
-    _log_compaction(f"Compaction result: {total_tokens} -> {compacted_tokens} tokens")
+    if compaction_request is None:
+        return ContextManageResult(messages=pruned)
     
-    return compacted
+    return ContextManageResult(messages=pruned, compaction_request=compaction_request)
 
 
 # =============================================================================
@@ -618,9 +622,74 @@ def _apply_caching(
 # Main Agent Loop
 # =============================================================================
 
+def _call_llm_with_retry(
+    llm: "LLM",
+    messages: List[Dict[str, Any]],
+    ctx: AgentContext,
+    model: str,
+    max_tokens: int,
+    tools: Optional[List[Dict[str, Any]]] = None,
+    extra_body: Optional[Dict[str, Any]] = None,
+    max_retries: int = 5,
+) -> Any:
+    """
+    Call LLM with retry logic. Single place for all LLM calls.
+    
+    Args:
+        llm: LLM client
+        messages: Messages to send
+        ctx: Agent context for logging
+        model: Model to use
+        max_tokens: Max tokens for response
+        tools: Optional tool specs
+        extra_body: Optional extra body params
+        max_retries: Number of retries
+        
+    Returns:
+        LLM response
+    """
+    for attempt in range(1, max_retries + 1):
+        try:
+            kwargs = {
+                "model": model,
+                "max_tokens": max_tokens,
+            }
+            if tools:
+                kwargs["tools"] = tools
+            if extra_body:
+                kwargs["extra_body"] = extra_body
+            
+            response = llm.chat(messages, **kwargs)
+            return response
+            
+        except CostLimitExceeded:
+            raise  # Don't retry cost limit errors
+            
+        except LLMError as e:
+            error_msg = str(e.message) if hasattr(e, 'message') else str(e)
+            ctx.log(f"LLM error (attempt {attempt}/{max_retries}): {e.code} - {error_msg}")
+            
+            if attempt < max_retries:
+                wait_time = 10 * attempt  # 10s, 20s, 30s, 40s
+                ctx.log(f"Retrying in {wait_time} seconds...")
+                time.sleep(wait_time)
+            else:
+                raise
+                
+        except Exception as e:
+            error_msg = str(e)
+            ctx.log(f"Unexpected error (attempt {attempt}/{max_retries}): {type(e).__name__}: {error_msg}")
+            
+            if attempt < max_retries:
+                wait_time = 10 * attempt
+                ctx.log(f"Retrying in {wait_time} seconds...")
+                time.sleep(wait_time)
+            else:
+                raise
+
+
 def run_agent_loop(
     llm: "LLM",
-    summarize_llm: "LLM",
     tools: "ToolRegistry",
     ctx: AgentContext,
     config: Dict[str, Any],
@@ -675,6 +744,8 @@ def run_agent_loop(
     
     max_iterations = config.get("max_iterations", 200)
     cache_enabled = config.get("cache_enabled", True)
+    compaction_model = config.get("compaction_model", "z-ai/glm-4.7")
+    agent_model = config.get("agent_model", "anthropic/claude-opus-4.5")
     
     # 6. Main loop
     iteration = 0
@@ -688,17 +759,33 @@ def run_agent_loop(
             # Context Management (replaces sliding window)
             # ================================================================
             # Check token usage and apply pruning/compaction if needed
-            context_messages = manage_context(
-                messages=messages,
-                system_prompt=system_prompt,
-                llm=llm,
-                summarize_llm=summarize_llm,
-            )
+            context_result = manage_context(messages=messages)
             
-            # If compaction happened, update our messages reference
-            if len(context_messages) < len(messages):
+            # Handle compaction if needed
+            if context_result.needs_compaction:
+                ctx.log("Running AI compaction...")
+                compaction_response = _call_llm_with_retry(
+                    llm=llm,
+                    messages=context_result.compaction_request.messages_to_compact,
+                    ctx=ctx,
+                    model=compaction_model,
+                    max_tokens=4096,
+                )
+                total_cost += compaction_response.cost
+                
+                # Apply compaction result
+                context_messages = apply_compaction_result(
+                    context_result.compaction_request,
+                    compaction_response.text or "",
+                )
                 ctx.log(f"Context compacted: {len(messages)} -> {len(context_messages)} messages")
                 messages = context_messages
+            else:
+                context_messages = context_result.messages
+                # If pruning happened, update our messages reference
+                if len(context_messages) < len(messages):
+                    ctx.log(f"Context pruned: {len(messages)} -> {len(context_messages)} messages")
+                    messages = context_messages
             
             # ================================================================
             # Apply caching (system prompt only for stability)
@@ -709,73 +796,27 @@ def run_agent_loop(
             tool_specs = tools.get_tools_for_llm()
             
             # ================================================================
-            # Call LLM with retry logic
+            # Call LLM for agent response
             # ================================================================
-            max_retries = 5
-            response = None
-            last_error = None
-            
-            for attempt in range(1, max_retries + 1):
-                try:
-                    response = llm.chat(
-                        cached_messages,
-                        model="anthropic/claude-opus-4.5",
-                        tools=tool_specs,
-                        max_tokens=config.get("max_tokens", 16384),
-                        extra_body={
-                            "reasoning": {"effort": config.get("reasoning_effort", "xhigh")},
-                        },
-                    )
+            response = _call_llm_with_retry(
+                llm=llm,
+                messages=cached_messages,
+                ctx=ctx,
+                model=agent_model,
+                max_tokens=config.get("max_tokens", 16384),
+                tools=tool_specs,
+                extra_body={"reasoning": {"effort": config.get("reasoning_effort", "xhigh")}},
+            )
 
-                    total_cost += response.cost
-                    
-                    # Track token usage from response
-                    if hasattr(response, "tokens") and response.tokens:
-                        tokens = response.tokens
-                        if isinstance(tokens, dict):
-                            total_input_tokens += tokens.get("input", 0)
-                            total_output_tokens += tokens.get("output", 0)
-                            total_cached_tokens += tokens.get("cached", 0)
-                    
-                    break  # Success, exit retry loop
-                    
-                except CostLimitExceeded:
-                    raise  # Don't retry cost limit errors
-                    
-                except LLMError as e:
-                    last_error = e
-                    error_msg = str(e.message) if hasattr(e, 'message') else str(e)
-                    ctx.log(f"LLM error (attempt {attempt}/{max_retries}): {e.code} - {error_msg}")
-                    
-                    # Don't retry authentication errors
-                    # if e.code in ("authentication_error", "invalid_api_key"):
-                    #     raise
-                    
-                    # Check if it's a retryable error
-                    # is_retryable = any(x in error_msg.lower() for x in [
-                    #     "504", "timeout", "empty response", "overloaded", "rate_limit"
-                    # ])
-                    
-                    if attempt < max_retries:
-                        wait_time = 10 * attempt  # 10s, 20s, 30s, 40s
-                        ctx.log(f"Retrying in {wait_time} seconds...")
-                        time.sleep(wait_time)
-                    else:
-                        raise
-                        
-                except Exception as e:
-                    last_error = e
-                    error_msg = str(e)
-                    ctx.log(f"Unexpected error (attempt {attempt}/{max_retries}): {type(e).__name__}: {error_msg}")
-                    
-                    # is_retryable = any(x in error_msg.lower() for x in ["504", "timeout"])
-                    
-                    if attempt < max_retries:
-                        wait_time = 10 * attempt
-                        ctx.log(f"Retrying in {wait_time} seconds...")
-                        time.sleep(wait_time)
-                    else:
-                        raise
+            total_cost += response.cost
+            
+            # Track token usage from response
+            if hasattr(response, "tokens") and response.tokens:
+                tokens = response.tokens
+                if isinstance(tokens, dict):
+                    total_input_tokens += tokens.get("input", 0)
+                    total_output_tokens += tokens.get("output", 0)
+                    total_cached_tokens += tokens.get("cached", 0)
             
         except CostLimitExceeded as e:
             ctx.log(f"Cost limit exceeded: {e}")
