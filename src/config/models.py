@@ -91,7 +91,7 @@ class AgentConfig(BaseModel):
     
     # Model settings
     model: str = Field(
-        default="anthropic/claude-opus-4-20250514",
+        default="anthropic/claude-opus-4.5",
         description="Model to use"
     )
     provider: Provider = Field(
@@ -119,7 +119,7 @@ class AgentConfig(BaseModel):
     def get_api_key(self) -> str:
         """Get the API key for the configured provider."""
         env_vars = {
-            Provider.OPENROUTER: ["OPENROUTER_API_KEY"],
+            Provider.OPENROUTER: "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",
             Provider.OPENAI: ["OPENAI_API_KEY"],
             Provider.ANTHROPIC: ["ANTHROPIC_API_KEY"],
         }

@@ -9,6 +9,8 @@ codex exec --dangerously-bypass-approvals-and-sandbox --skip-git-repo-check \
 All settings are HARDCODED for benchmark mode.
 No CLI arguments needed - instruction comes from term_sdk context.
 
+Uses litellm for LLM calls instead of term_sdk LLM.
+
 Usage:
     python agent.py
     # or
@@ -25,7 +27,10 @@ from pathlib import Path
 # Add parent to path for imports
 sys.path.insert(0, str(Path(__file__).parent))
 
-from term_sdk import Agent, AgentContext, LLM, LLMError, CostLimitExceeded, run
+from term_sdk import Agent, AgentContext, run
+
+# Use litellm-based client instead of term_sdk LLM
+from src.api.litellm_client import LiteLLMClient, LLMError, CostLimitExceeded
 
 from src.config.defaults import CONFIG
 from src.core.loop import run_agent_loop
@@ -42,21 +47,23 @@ class SuperAgent(Agent):
     - Reasoning effort: xhigh
     - All safety bypasses enabled
     - JSONL output format
+    
+    Uses litellm for LLM calls via OpenRouter.
     """
     
     def setup(self):
         """Initialize LLM client and tools (called once at startup)."""
-        self.llm = LLM(
+        self.llm = LiteLLMClient(
             provider=CONFIG.get("provider", "openrouter"),
             default_model=CONFIG["model"],
-            temperature=CONFIG.get("temperature"),
+            temperature=CONFIG.get("temperature", 0.0),
             max_tokens=CONFIG["max_tokens"],
         )
         
         self.tools = ToolRegistry()
         self._start_time = time.time()
         
-        self._log(f"SuperAgent initialized")
+        self._log(f"SuperAgent initialized (using litellm)")
         self._log(f"Model: {CONFIG['model']}")
         self._log(f"Reasoning effort: {CONFIG['reasoning_effort']}")
     

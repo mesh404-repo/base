@@ -13,6 +13,8 @@ Context management strategy (like OpenCode/Codex):
 - Tool output pruning (clear old outputs first)
 - AI compaction when needed (summarize conversation)
 - Stable system prompt for cache hits
+
+Uses litellm for LLM calls instead of term_sdk LLM.
 """
 
 from __future__ import annotations
@@ -22,7 +24,10 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
-from term_sdk import AgentContext, LLMError, CostLimitExceeded
+from term_sdk import AgentContext
+
+# Use litellm-based client instead of term_sdk LLM
+from src.api.litellm_client import LLMError, CostLimitExceeded
 
 from src.output.jsonl import (
     emit,
@@ -48,7 +53,7 @@ from src.core.compaction import (
 )
 
 if TYPE_CHECKING:
-    from term_sdk import LLM
+    from src.api.litellm_client import LiteLLMClient
     from src.tools.registry import ToolRegistry
 
 
@@ -164,7 +169,7 @@ def _apply_caching(
 
 
 def run_agent_loop(
-    llm: "LLM",
+    llm: "LiteLLMClient",
     tools: "ToolRegistry",
     ctx: AgentContext,
     config: Dict[str, Any],
@@ -257,14 +262,12 @@ def run_agent_loop(
             max_retries = 10
             response = None
             last_error = None
-
-            model_name = "anthropic/claude-opus-4.5"
+            
             for attempt in range(1, max_retries + 1):
                 try:
                     response = llm.chat(
                         cached_messages,
                         tools=tool_specs,
-                        model=model_name,
                         max_tokens=config.get("max_tokens", 16384),
                         extra_body={
                             "reasoning": {"effort": config.get("reasoning_effort", "xhigh")},
@@ -300,7 +303,6 @@ def run_agent_loop(
                     #     "504", "timeout", "empty response", "overloaded", "rate_limit"
                     # ])
 
-                    model_name = "anthropic/claude-sonnet-4.5"
                     
                     if attempt < max_retries:
                         wait_time = 2 * attempt  # 10s, 20s, 30s, 40s
@@ -314,8 +316,7 @@ def run_agent_loop(
                     error_msg = str(e)
                     ctx.log(f"Unexpected error (attempt {attempt}/{max_retries}): {type(e).__name__}: {error_msg}")
                     
-                    # is_retryable = any(x in error_msg.lower() for x in ["504", "timeout"])
-                    model_name = "anthropic/claude-sonnet-4.5"
+                    # is_retryable = any(x in error_msg.lower() for x in ["504", "timeout"])                    
                     if attempt < max_retries:
                         wait_time = 10 * attempt
                         ctx.log(f"Retrying in {wait_time} seconds...")
