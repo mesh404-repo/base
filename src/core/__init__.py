@@ -8,8 +8,8 @@ from src.core.executor import (
     SandboxPolicy,
 )
 
-# Compaction module (like OpenCode/Codex context management)
-from src.core.compaction import (
+# Compaction functions (now in loop.py)
+from src.core.loop import (
     manage_context,
     estimate_tokens,
     estimate_message_tokens,
