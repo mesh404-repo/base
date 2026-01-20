@@ -265,14 +265,15 @@ def run_agent_loop(
             
             for attempt in range(1, max_retries + 1):
                 try:
-                    response = llm.chat(
-                        cached_messages,
-                        tools=tool_specs,
-                        max_tokens=config.get("max_tokens", 16384),
-                        extra_body={
-                            "reasoning": {"effort": config.get("reasoning_effort", "xhigh")},
-                        },
-                    )
+                    # response = llm.chat(
+                    #     cached_messages,
+                    #     tools=tool_specs,
+                    #     max_tokens=config.get("max_tokens", 16384),
+                    #     extra_body={
+                    #         "reasoning": {"effort": config.get("reasoning_effort", "xhigh")},
+                    #     },
+                    # )
+                    break
 
                     total_cost += response.cost
                     
